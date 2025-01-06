@@ -3,8 +3,11 @@ import {createServer} from 'node:net';
 import {readFileSync} from 'node:fs';
 import {log, formatAddress} from './utils.js';
 import {ByteBuf, readHandshake, writeStringPacket, PACKET_PONG} from './mc-protocol.js';
+import { playerCountManager } from './playerCount.js';
 
 const HANDSHAKE_TIMEOUT = 2000; // ms
+const PROTOCOL_VERSION = parseInt(process.env.PROTOCOL_VERSION) || 763;
+const PROTOCOL_NAME = process.env.PROTOCOL_NAME || `1.20.1`;
 
 function main() {
     const server = createServer();
@@ -45,7 +48,6 @@ function handleSocket(socket) {
     let answered = false;
     let sockerErr = undefined;
     socket.on('error', (err) => {
-        // log('Socket Error:', err); // debug
         if (!sockerErr) {
             sockerErr = err;
         }
@@ -69,14 +71,12 @@ function handleSocket(socket) {
 
     // Add data handler
     const buf = new ByteBuf();
-    socket.on('data', (data) => {
+    socket.on('data', async (data) => {
         if (socket.readyState !== 'open') {
-            // always skip data after a call to socket.end()
-            // without this, already received data sometimes continues to be read for a short time
             return;
         }
         if (answered) {
-            return; // skip (already answered)
+            return;
         }
 
         // Read the handshake
@@ -84,10 +84,9 @@ function handleSocket(socket) {
         buf.resetOffset();
         const handshake = readHandshake(buf);
         if (handshake === undefined) {
-            return; // skip (missing data)
+            return;
         }
         if (handshake === false) {
-            // fail (illegal handshake)
             socket.destroy(new Error('Illegal handshake'));
             return;
         }
@@ -97,9 +96,9 @@ function handleSocket(socket) {
         // Respond and close the socket
         answered = true;
         if (handshake.state === 2) {
-            socket.end(getKickPacket(handshake));
+            socket.end(getKickPacket());
         } else {
-            socket.write(getServerListPacket(handshake));
+            socket.write(await getServerListPacket());
             socket.end(PACKET_PONG);
         }
     });
@@ -137,28 +136,40 @@ const getKickPacket = (() => {
         0,
         JSON.stringify(parseChatComponent(process.env.KICK_MESSAGE || '§cNot available'))
     );
-    return (handshake) => packet;
+    return () => packet;
 })();
 
 const getServerListPacket = (() => {
-    // TODO: Allow PROTOCOL_VERSION=auto to copy the client's one
-    const packet = writeStringPacket(
-        0,
-        JSON.stringify({
-            version: {
-                name: process.env.PROTOCOL_NAME || '',
-                protocol: parseInt(process.env.PROTOCOL_VERSION) || 0,
-            },
-            players: {
-                max: parseInt(process.env.MAX_PLAYERS) || 0,
-                online: parseInt(process.env.ONLINE_PLAYERS) || 0,
-                sample: [],
-            },
-            description: parseChatComponent(process.env.MOTD || '§eHello World!'),
-            favicon: readFavicon(process.env.FAVICON),
-        })
-    );
-    return (handshake) => packet;
+    return async () => {
+        let onlinePlayers = 0;
+        
+        // Check if a reflected server is specified
+        if (process.env.REFLECTED_SERVER) {
+            try {
+                onlinePlayers = await playerCountManager.fetchPlayerCount(process.env.REFLECTED_SERVER);
+            } catch (error) {
+                log('Failed to fetch player count:', error);
+                onlinePlayers = 0;
+            }
+        }
+
+        return writeStringPacket(
+            0,
+            JSON.stringify({
+                version: {
+                    name: PROTOCOL_NAME,
+                    protocol: PROTOCOL_VERSION,
+                },
+                players: {
+                    max: parseInt(process.env.MAX_PLAYERS) || 100,
+                    online: onlinePlayers,
+                    sample: [],
+                },
+                description: parseChatComponent(process.env.MOTD || '§eHello World!'),
+                favicon: readFavicon(process.env.FAVICON),
+            })
+        );
+    };
 })();
 
 main();
