@@ -1,4 +1,4 @@
-# Fake Minecraft Server
+# Ingress Server
 
 This is a fake Minecraft server that allows us to post on server lists despite being modded. It will match the version of the player attempting to connect, and kick them with a message to join our Discord.
 
