@@ -1,10 +1,8 @@
 # Fake Minecraft Server
 
-This is a fake Minecraft server that only responds to server list requests and
-sends a kick message when a player try to join.
+This is a fake Minecraft server that allows us to post on server lists despite being modded. It will match the version of the player attempting to connect, and kick them with a message to join our Discord.
 
-![server list example](./.readme/server-list.png?raw=true)
-![kick message example](./.readme/kick.png?raw=true)
+In efforts to respect server listing sites and abide by their terms of service, Landfall has also implemented a system that mirrors the real playercount of the main modded server.
 
 ## Usage
 
@@ -28,16 +26,17 @@ The configuration is defined via environment variables:
 | `MOTD`             | The message displayed in the server list                                                                    | `§eHello World!`  |
 | `FAVICON`          | The favicon displayed in the server list (path to a PNG file, or a string like `data:image/png;base64,XXX`) | -                 |
 | `MAX_PLAYERS`      | The number of slots displayed in the server list                                                            | `0`               |
-| `ONLINE_PLAYERS`   | The number of online players displayed in the server list                                                   | `0`               |
-| `PROTOCOL_NAME`    | The protocol name reported in the server list                                                               | (empty)           |
+| `REFLECTED_SERVER`   | The server to reflect player count from (in hostname:port format)                                         | -                 |
+| `PROTOCOL_NAME`    | The protocol name reported in the server list                                                               | `1.20.1`          |
 | `PROTOCOL_VERSION` | The protocol version reported in the server list                                                            | `0`               |
 
 To set these environment variables, you can either export them in your shell or
-create a `.env` file in the root of the project with the following format:
+create a `.env` file in the root of the project. Here's an example:
 
 ```
-LISTEN_PORT=25565
-KICK_MESSAGE="§c§lSorry.\n§cCome back later."
-MOTD="§eWelcome to My Server!\n§dJoin now!"
-PROTOCOL_NAME="§cHey!"
+LISTEN_PORT=25566
+KICK_MESSAGE="§b§lLandfall SMP\n\n§fJoin our Discord to gain access and join our rich canon!\n§8http://§7§ldiscord.landfall.world\n\n§r§7§oWe can't wait to meet you!"
+MOTD="§9§lLandfall SMP\n§8§l» §7Ingress §8§l»"
+PROTOCOL_NAME="§cIngress"
+REFLECTED_SERVER="play.landfall.world:25565"
 ```
