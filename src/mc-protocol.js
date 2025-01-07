@@ -176,12 +176,6 @@ export function getVarIntSize(value) {
 }
 
 /**
- * The maximum length of a handshake packet in bytes.
- * @type {number}
- */
-const HANDSHAKE_MAX_LEN = 267; // (packetLen)2 + (packetId)1 + (protocolVersion)4 + (hostname)2+255 + (port)2 + (state)1
-
-/**
  * Reads a Minecraft handshake packet from a buffer.
  *
  * @param {ByteBuf} buf - The buffer to read from.
@@ -191,55 +185,132 @@ const HANDSHAKE_MAX_LEN = 267; // (packetLen)2 + (packetId)1 + (protocolVersion)
  *  or `undefined` if there is missing data to wait.
  */
 export function readHandshake(buf) {
-    // read packet len
-    const packetLen = buf.readVarInt(2, true);
-    if (packetLen === undefined) {
-        return; // skip (missing data)
-    }
-    if (packetLen === false || packetLen > HANDSHAKE_MAX_LEN) {
-        return false; // fail (too long packet)
-    }
-    if (packetLen > buf.length) {
-        return; // skip (missing data)
-    }
+    try {
+        // debug
+        console.log('Handshake attempt', {
+            bufferLength: buf.length(),
+            firstBytes: buf.data ? buf.data.toString('hex') : 'no data'
+        });
 
-    // read packet id
-    const packetId = buf.readVarInt(1);
-    if (packetId === false || packetId !== 0) {
-        return false; // fail (not an handshake)
-    }
+        // looots of safety checks to try to prevent downtime and log the issue for review
+        if (!buf.data || buf.length() === 0) {
+            console.log('Empty buffer received');
+            return false;
+        }
 
-    // read protocol version
-    const protocolVersion = buf.readVarInt(4);
-    if (protocolVersion === false || protocolVersion <= 0) {
-        return false; // fail (illegal version)
-    }
+        let packetLen;
+        try {
+             // Try reading the packet length with a limit of 2 bytes for the VarInt
+            packetLen = buf.readVarInt(2, true);
+        } catch (lenError) {
+            console.log('Failed to read packet length:', lenError);
+            return false;
+        }
 
-    // read hostname
-    // note: we limit it to 255 utf8 bytes, considering that it contains only ascii characters
-    let hostname = buf.readString(2, 255);
-    if (hostname === false) {
-        return false; // fail (illegal hostname)
-    }
+        if (packetLen === undefined || packetLen === false) {
+            console.log('Undefined or false packet length');
+            return false;
+        }
 
-    // read port
-    const port = buf.readUnsignedShort();
-    if (port === false || port <= 0 || port > 65535) {
-        return false; // fail (illegal post)
-    }
+        // More forgiving limit for modded clients, mainly for us to test without opening vanilla
+        const MAX_HANDSHAKE_LENGTH = 32768;
+        if (packetLen < 1 || packetLen > MAX_HANDSHAKE_LENGTH) {
+            console.log('Extreme packet length:', packetLen);
+            return false;
+        }
 
-    // read (next_)state
-    const state = buf.readVarInt(1);
-    if (state !== 1 && state !== 2) {
-        return false; // fail (illegal state)
-    }
+        if (packetLen > buf.length()) {
+            console.log('Incomplete packet', {
+                packetLen,
+                bufferLength: buf.length()
+            });
+            return undefined;
+        }
 
-    // trim clients/mods suffix from host (everything after \0) then returns
-    const hostnameEnd = hostname.indexOf('\0');
-    if (hostnameEnd !== -1) {
-        hostname = hostname.slice(0, hostnameEnd);
+        let packetId;
+        try {
+            packetId = buf.readVarInt(1);
+        } catch (idError) {
+            console.log('Failed to read packet ID:', idError);
+            return false;
+        }
+
+        if (packetId !== 0) {
+            console.log('Unusual packet ID:', packetId);
+            return false;
+        }
+
+        // as of commit, theres <1000 protocol versions. our goal is to mirror whatever the client sends so 2000 seems good!
+        let protocolVersion;
+        try {
+            protocolVersion = buf.readVarInt(4);
+        } catch (versionError) {
+            console.log('Failed to read protocol version:', versionError);
+            return false;
+        }
+
+        if (protocolVersion === false || protocolVersion < 0 || protocolVersion > 2000) {
+            console.log('Invalid protocol version:', protocolVersion);
+            return false;
+        }
+
+        let hostname;
+        try {
+            hostname = buf.readString(2, 255);
+        } catch (hostnameError) {
+            console.log('Failed to read hostname:', hostnameError);
+            return false;
+        }
+
+        if (hostname === false || typeof hostname !== 'string') {
+            console.log('Invalid hostname:', hostname);
+            return false;
+        }
+
+        let port;
+        try {
+            port = buf.readUnsignedShort();
+        } catch (portError) {
+            console.log('Failed to read port:', portError);
+            return false;
+        }
+
+        if (port === false || port < 0 || port > 65535) {
+            console.log('Invalid port:', port);
+            return false;
+        }
+
+        let state;
+        try {
+            state = buf.readVarInt(1);
+        } catch (stateError) {
+            console.log('Failed to read state:', stateError);
+            return false;
+        }
+
+        if (state !== 1 && state !== 2) {
+            console.log('Unusual state:', state);
+            return false;
+        }
+
+        // trim null chars
+        if (hostname.includes('\0')) {
+            hostname = hostname.split('\0')[0];
+        }
+
+        // Log good parse for debugging
+        console.log('Handshake parsed successfully', {
+            protocolVersion,
+            hostname,
+            port,
+            state
+        });
+
+        return {protocolVersion, hostname, port, state};
+    } catch (unexpectedError) {
+        console.error('Big, bad, catastrophic unexpected error in handshake parsing:', unexpectedError);
+        return false;
     }
-    return {protocolVersion, hostname, port, state};
 }
 
 export function writeStringPacket(packetId, str) {
